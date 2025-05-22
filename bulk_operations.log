@@ -1,0 +1,7 @@
+2025-05-22 11:04:23,770 - ERROR - Bulk operation failed: JSONL file not found: variant_updates.jsonl
+2025-05-22 11:04:55,653 - ERROR - Bulk operation failed: No operation ID returned
+2025-05-22 11:11:11,441 - ERROR - Bulk operation failed: name 'json' is not defined
+2025-05-22 11:11:37,928 - ERROR - Bulk operation failed: No operation ID returned
+2025-05-22 11:12:44,185 - INFO - Monitoring operation None
+2025-05-22 11:12:44,691 - ERROR - Bulk operation failed: Failed to get operation status
+2025-05-22 11:56:15,574 - ERROR - Bulk operation failed: Operation errors: Invalid Bulk Mutation Field - ProductVariantsBulkUpdateInput isn't a defined input type (on $input), Invalid Bulk Mutation Field - Field 'productVariantsBulkUpdate' is missing required arguments: variants, productId, Invalid Bulk Mutation Field - Field 'productVariantsBulkUpdate' doesn't accept argument 'input', Invalid Bulk Mutation Field - Variable $input is declared by bulkOperation but not used

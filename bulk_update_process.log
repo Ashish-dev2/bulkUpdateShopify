@@ -1,0 +1,33 @@
+2025-05-22 14:55:53,530 - backend - ERROR - Error loading CSV: [Errno 2] No such file or directory: 'your_data.csv'
+2025-05-22 14:55:53,530 - process - ERROR - Bulk update process failed: [Errno 2] No such file or directory: 'your_data.csv'
+2025-05-22 14:58:16,703 - backend - INFO - Generated GraphQL mutation files
+2025-05-22 14:58:16,709 - backend - INFO - Successfully generated JSONL files
+2025-05-22 14:58:18,817 - process - ERROR - variant operation failed: Operation errors: [{"field": null, "message": "Invalid Bulk Mutation Field - ProductVariantsBulkUpdateInput isn't a defined input type (on $input)"}, {"field": null, "message": "Invalid Bulk Mutation Field - Field 'productVariantsBulkUpdate' is missing required arguments: variants, productId"}, {"field": null, "message": "Invalid Bulk Mutation Field - Field 'productVariantsBulkUpdate' doesn't accept argument 'input'"}, {"field": null, "message": "Invalid Bulk Mutation Field - Variable $input is declared by bulkVariantUpdate but not used"}]
+2025-05-22 14:58:27,074 - backend - INFO - Operation COMPLETED
+2025-05-22 14:58:30,603 - process - ERROR - inventory operation failed: Operation errors: [{"field": ["mutation"], "message": "You must use an allowed mutation name."}]
+2025-05-22 16:08:41,085 - backend - INFO - Generated correct GraphQL mutation files
+2025-05-22 16:08:41,091 - backend - INFO - Successfully generated JSONL files with correct format
+2025-05-22 16:08:50,255 - backend - INFO - Operation COMPLETED
+2025-05-22 16:08:59,057 - backend - INFO - Operation COMPLETED
+2025-05-22 16:09:01,336 - process - ERROR - inventory operation failed: Operation errors: [{"field": ["mutation"], "message": "You must use an allowed mutation name."}]
+2025-05-22 16:11:59,941 - backend - INFO - Generated correct GraphQL mutation files
+2025-05-22 16:11:59,948 - backend - INFO - Successfully generated JSONL files with correct format
+2025-05-22 16:12:08,204 - backend - INFO - Operation COMPLETED
+2025-05-22 16:12:18,120 - backend - INFO - Operation COMPLETED
+2025-05-22 16:12:20,450 - process - ERROR - inventory operation failed: Operation errors: [{"field": ["mutation"], "message": "You must use an allowed mutation name."}]
+2025-05-22 16:15:45,039 - backend - INFO - Generated correct GraphQL mutation files
+2025-05-22 16:15:45,046 - backend - INFO - Successfully generated JSONL files with correct format
+2025-05-22 16:16:00,503 - backend - INFO - Operation COMPLETED
+2025-05-22 16:16:08,668 - backend - INFO - Operation COMPLETED
+2025-05-22 16:16:11,167 - process - ERROR - inventory operation failed: Operation errors: [{"field": ["mutation"], "message": "You must use an allowed mutation name."}]
+2025-05-22 16:37:41,550 - backend - INFO - Generated correct GraphQL mutation files
+2025-05-22 16:37:41,554 - backend - INFO - Successfully generated JSONL files with correct format
+2025-05-22 16:37:42,625 - backend - INFO - Successfully uploaded variant_updates.jsonl to staged location.
+2025-05-22 16:37:43,386 - process - ERROR - variant operation failed: User errors running bulk mutation: [{"field": null, "message": "Invalid Bulk Mutation Field - Type mismatch on variable $variants and argument variants ([ProductVariantInput!]! / [ProductVariantsBulkInput!]!)"}]
+2025-05-22 16:37:44,410 - backend - INFO - Successfully uploaded product_updates.jsonl to staged location.
+2025-05-22 16:37:45,335 - backend - INFO - Monitoring operation gid://shopify/BulkOperation/6513166385520
+2025-05-22 16:37:51,556 - backend - INFO - Operation COMPLETED
+2025-05-22 16:37:51,557 - backend - INFO - Downloading results from: https://storage.googleapis.com/shopify-tiers-assets-prod-us-east1/bulk-operation-outputs/mmcf7nb2myakteghk1iugjsw7psg-final?GoogleAccessId=assets-us-prod%40shopify-tiers.iam.gserviceaccount.com&Expires=1748516868&Signature=q6jEMq317QF4rr%2BJD1BbQgkoR2Vgxa8sUiXa9sU%2B51h3SfpbCyNGMc2F2rTsLUyMGMyaxRtbIie0QZzZAInnaJV0%2Bv0WgoPzOHGTTJ3wLXQ%2FKpGbu8a6w77%2F2XZzEFuqefMoMLe2Y7LLHZz2XUU54nSOiHGauY%2BAL7PHl3UAsGGjqXS7KJFcW2hTx27TtIr3LMBuOGkG6OhBKg1P2xYwVaNUpK8tLrptHFsB804gmYwcw1sGKFTNLfFRKNsVLZzdxZ5DPJPSsiDzhVeJyYUSBqfkQxk9Goi3kvR4Ml7hB%2BEAUrcJR6M8uP%2BxueLq%2FT6AkB57MTe9a1y6rHxGGr90uA%3D%3D&response-content-disposition=attachment%3B+filename%3D%22bulk-6513166385520.jsonl%22%3B+filename%2A%3DUTF-8%27%27bulk-6513166385520.jsonl&response-content-type=application%2Fjsonl
+2025-05-22 16:37:52,614 - backend - INFO - Successfully downloaded results to: output_results\product_results_20250522163751.jsonl
+2025-05-22 16:37:52,615 - backend - INFO - Processing result file: output_results\product_results_20250522163751.jsonl
+2025-05-22 16:37:52,647 - backend - INFO - Result file processed: Successes=19, Failures=0
