@@ -1,11 +1,15 @@
 import os
 import json
 import logging
-from datetime import datetime
-from dotenv import load_dotenv
 import time
+from datetime import datetime
 from multiprocessing import Queue
-from backend import ShopifyBulkMutationGenerator, ShopifyBulkOperator
+from dotenv import load_dotenv
+from backend import (
+    ShopifyBulkMutationGenerator,
+    ShopifyBulkOperator,
+    ShopifyInventoryUpdater
+)
 
 # Configure logging
 logging.basicConfig(
@@ -18,55 +22,65 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def run_bulk_update_process(csv_filepath: str, output_results_dir: str, update_queue: Queue, dry_run: bool = False):
-    """Main function to run the bulk update process."""
+def run_bulk_update_process(csv_filepath: str, output_results_dir: str, 
+                           update_queue: Queue, dry_run: bool = False):
+    """Main function to run the bulk update process with inventory support."""
     start_time = time.time()
-    
-    # Load environment variables
-    load_dotenv()
-    shopify_domain = os.getenv("SHOPIFY_DOMAIN")
-    admin_api_token = os.getenv("DEMOATLANTIC_ADMIN_TOKEN")
-    api_version = os.getenv("SHOPIFY_API_VERSION", "2024-04")
-    location_id = os.getenv("SHOPIFY_LOCATION_ID")
-
-    # Validate configuration
-    if not all([shopify_domain, admin_api_token, location_id]):
-        error_msg = "Missing required environment variables"
-        update_queue.put({"type": "error", "message": error_msg})
-        logger.error(error_msg)
-        return
+    process_stats = {}
+    inventory_results = {}
 
     try:
-        # Initialize components
-        generator = ShopifyBulkMutationGenerator(csv_filepath, location_id)
-        operator = ShopifyBulkOperator(shopify_domain, admin_api_token, api_version)
+        # Load environment configuration
+        load_dotenv()
+        shopify_domain = os.getenv("SHOPIFY_DOMAIN")
+        admin_api_token = os.getenv("DEMOATLANTIC_ADMIN_TOKEN")
+        api_version = os.getenv("SHOPIFY_API_VERSION", "2024-04")
+        location_id = os.getenv("SHOPIFY_LOCATION_ID")
 
-        # Generate files
+        # Validate configuration
+        if not all([shopify_domain, admin_api_token, location_id]):
+            error_msg = "Missing required environment variables"
+            update_queue.put({"type": "error", "message": error_msg})
+            logger.error(error_msg)
+            return
+
+        # Initialize components
+        update_queue.put({"type": "status", "message": "Initializing components..."})
+        generator = ShopifyBulkMutationGenerator(csv_filepath, location_id)
+        bulk_operator = ShopifyBulkOperator(shopify_domain, admin_api_token, api_version)
+        inventory_updater = ShopifyInventoryUpdater(shopify_domain, admin_api_token, api_version)
+
+        # Generate mutation files
         update_queue.put({"type": "status", "message": "Generating mutation files..."})
         generator.generate_mutation_queries()
 
+        # Process CSV data
         update_queue.put({"type": "status", "message": "Processing CSV data..."})
-        success, stats = generator.process_csv()
-        if not success:
+        csv_success, process_stats = generator.process_csv()
+        if not csv_success:
             raise Exception("Failed to process CSV data")
+
+        update_queue.put({
+            "type": "progress",
+            "stats": process_stats
+        })
 
         if dry_run:
             update_queue.put({
                 "type": "complete",
                 "status": "Dry run completed",
-                "stats": stats,
+                "stats": process_stats,
                 "time_taken": time.time() - start_time
             })
             return
 
-        # Process each operation type
+        # Process bulk operations (products and variants)
         operations = [
             ("variant", "variant_updates.jsonl", "variant_mutation.graphql"),
             ("product", "product_updates.jsonl", "product_mutation.graphql")
-            #("inventory", "inventory_updates.jsonl", "inventory_mutation.graphql")
         ]
 
-        results = {
+        bulk_results = {
             "total_operations": len(operations),
             "completed": 0,
             "failed": 0,
@@ -75,6 +89,7 @@ def run_bulk_update_process(csv_filepath: str, output_results_dir: str, update_q
 
         os.makedirs(output_results_dir, exist_ok=True)
 
+        # Process product and variant bulk operations
         for op_type, jsonl_file, mutation_file in operations:
             op_result = {
                 "type": op_type,
@@ -86,7 +101,7 @@ def run_bulk_update_process(csv_filepath: str, output_results_dir: str, update_q
             try:
                 update_queue.put({
                     "type": "status", 
-                    "message": f"Starting {op_type} operation..."
+                    "message": f"Starting {op_type} bulk operation..."
                 })
 
                 # Load mutation query
@@ -94,7 +109,7 @@ def run_bulk_update_process(csv_filepath: str, output_results_dir: str, update_q
                     mutation_query = f.read().strip()
 
                 # Create staged upload
-                upload_url, params = operator._staged_upload_create(jsonl_file)
+                upload_url, params = bulk_operator._staged_upload_create(jsonl_file)
                 staged_path = next(
                     (p['value'] for p in params if p['name'] == 'key'), 
                     None
@@ -103,64 +118,139 @@ def run_bulk_update_process(csv_filepath: str, output_results_dir: str, update_q
                     raise Exception("Could not get staged upload path")
 
                 # Upload file
-                operator._upload_jsonl_file(jsonl_file, upload_url, params)
+                bulk_operator._upload_jsonl_file(jsonl_file, upload_url, params)
 
-                # Run operation
-                operation_id = operator._run_bulk_mutation(mutation_query, staged_path)
-                final_status = operator._monitor_operation(operation_id, update_queue)
+                # Run bulk operation
+                operation_id = bulk_operator._run_bulk_mutation(mutation_query, staged_path)
+                final_status = bulk_operator._monitor_operation(operation_id, update_queue)
 
                 if final_status['status'] != "COMPLETED":
                     raise Exception(f"Operation failed with status: {final_status['status']}")
 
-                # Download results
+                # Download and process results
                 result_file = os.path.join(
                     output_results_dir, 
                     f"{op_type}_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.jsonl"
                 )
                 
-                if operator.download_results(final_status['url'], result_file):
-                    success, failure, _ = operator.process_result_file(result_file)
+                if bulk_operator.download_results(final_status['url'], result_file):
+                    success, failure, _ = bulk_operator.process_result_file(result_file)
                     op_result.update({
                         "status": "completed",
                         "success_count": success,
                         "failure_count": failure,
                         "result_file": result_file
                     })
-                    results["completed"] += 1
+                    bulk_results["completed"] += 1
                 else:
                     raise Exception("Failed to download results")
 
             except Exception as e:
-                logger.error(f"{op_type} operation failed: {str(e)}")
+                logger.error(f"{op_type} bulk operation failed: {str(e)}")
                 op_result.update({
                     "status": "failed",
                     "error": str(e)
                 })
-                results["failed"] += 1
+                bulk_results["failed"] += 1
                 update_queue.put({
                     "type": "error",
-                    "message": f"{op_type} operation failed: {str(e)}"
+                    "message": f"{op_type} bulk operation failed: {str(e)}"
                 })
 
             finally:
-                results["details"].append(op_result)
+                bulk_results["details"].append(op_result)
+
+        # Process inventory updates
+        inventory_stats = {}
+        if generator.inventory_changes:
+            try:
+                update_queue.put({
+                    "type": "status",
+                    "message": f"Starting inventory updates ({len(generator.inventory_changes)} changes)..."
+                })
+
+                # Process inventory updates in batches
+                inventory_results = inventory_updater.process_inventory_updates(
+                    generator.inventory_changes,
+                    update_queue
+                )
+
+                # Update statistics
+                process_stats['inventory_updates'] = inventory_results.get('successful_updates', 0)
+                process_stats['inventory_errors'] = inventory_results.get('failed_updates', 0)
+                inventory_stats = {
+                    'total_changes': inventory_results['total_changes'],
+                    'successful': inventory_results['successful_updates'],
+                    'failed': inventory_results['failed_updates']
+                }
+
+                # Save inventory results
+                inv_result_file = os.path.join(
+                    output_results_dir,
+                    f"inventory_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+                )
+                with open(inv_result_file, 'w') as f:
+                    json.dump(inventory_results, f)
+
+                update_queue.put({
+                    "type": "status",
+                    "message": f"Inventory updates completed: {inventory_stats['successful']} successful, {inventory_stats['failed']} failed"
+                })
+
+            except Exception as e:
+                logger.error(f"Inventory updates failed: {str(e)}")
+                update_queue.put({
+                    "type": "error",
+                    "message": f"Inventory updates failed: {str(e)}"
+                })
+                process_stats['inventory_errors'] = len(generator.inventory_changes)
 
         # Clean up temporary files
-        for f in [f[1] for f in operations] + [f[2] for f in operations]:
+        cleanup_files = [
+            "variant_mutation.graphql",
+            "product_mutation.graphql",
+            "variant_updates.jsonl",
+            "product_updates.jsonl"
+        ]
+        
+        for f in cleanup_files:
             if os.path.exists(f):
                 os.remove(f)
 
+        # Prepare final results
+        final_results = {
+            "status": "Completed" if bulk_results["failed"] == 0 else "Completed with errors",
+            "time_taken": round(time.time() - start_time, 2),
+            "bulk_operations": bulk_results,
+            "inventory_operations": inventory_stats,
+            "csv_stats": process_stats
+        }
+
         update_queue.put({
             "type": "complete",
-            "status": "Completed" if results["failed"] == 0 else "Completed with errors",
-            "stats": stats,
-            "results": results,
-            "time_taken": time.time() - start_time
+            "results": final_results
         })
 
     except Exception as e:
-        logger.error(f"Bulk update process failed: {str(e)}")
+        logger.error(f"Process failed: {str(e)}")
         update_queue.put({
             "type": "error",
             "message": f"Process failed: {str(e)}"
         })
+        return {
+            "status": "Failed",
+            "error": str(e),
+            "time_taken": round(time.time() - start_time, 2)
+        }
+
+if __name__ == "__main__":
+    # Example usage
+    from multiprocessing import Queue
+    queue = Queue()
+    
+    run_bulk_update_process(
+        csv_filepath="sample.csv",
+        output_results_dir="./results",
+        update_queue=queue,
+        dry_run=False
+    )
