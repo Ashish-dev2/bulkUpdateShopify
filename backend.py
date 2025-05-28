@@ -26,8 +26,7 @@ class ShopifyBulkMutationGenerator:
             df = pd.read_csv(self.csv_filepath)
             
             # Validate required columns
-            required_cols = {'ID', 'Variant ID', 'Inventory Item ID', 
-                           'Existing Quantity', 'Inventory Available: Head Office - DG'}
+            required_cols = {'ID', 'Variant ID', 'Inventory Item ID', 'Inventory Available: Head Office - DG'}
             missing = required_cols - set(df.columns)
             if missing:
                 raise ValueError(f"Missing required columns: {missing}")
@@ -110,7 +109,7 @@ class ShopifyBulkMutationGenerator:
                     variant_data["metafields"].append({
                         "namespace": "custom",
                         "key": "original_price",
-                        "type": "number_decimal",
+                        "type": "single_line_text_field",
                         "value": str(row['Variant Metafield: custom.original_price [number_decimal]'])
                     })
                 
@@ -135,7 +134,7 @@ class ShopifyBulkMutationGenerator:
                 if pd.notna(row.get('Metafield: custom.sla [single_line_text_field]')):
                     metafields.append({
                         "namespace": "custom",
-                        "key": "sla",
+                        "key": "sladay",
                         "type": "single_line_text_field",
                         "value": str(row['Metafield: custom.sla [single_line_text_field]'])
                     })
@@ -160,16 +159,16 @@ class ShopifyBulkMutationGenerator:
             # Process inventory changes
             try:
                 inventory_item_id = row['Inventory Item ID']
-                existing_qty = row['Existing Quantity']
-                new_qty = row['Inventory Available: Head Office - DG']
+                #existing_qty = row['Existing Quantity']
+                qty = row['Inventory Available: Head Office - DG']
                 
-                if pd.notna(inventory_item_id) and pd.notna(existing_qty) and pd.notna(new_qty):
-                    delta = int(float(new_qty)) - int(float(existing_qty))
-                    if delta != 0:
+                if pd.notna(inventory_item_id) and pd.notna(qty):
+                    #delta = int(float(new_qty)) - int(float(existing_qty))
+                    #if delta != 0:
                         inventory_changes.append({
                             "inventoryItemId": f"gid://shopify/InventoryItem/{inventory_item_id}",
                             "locationId": self.location_id,
-                            "delta": delta
+                            "quantity": int(float(qty))
                         })
                         stats['inventory_updates'] += 1
             except Exception as e:
@@ -196,6 +195,13 @@ class ShopifyBulkMutationGenerator:
 
 class ShopifyBulkOperator:
     """Handles Shopify bulk operations execution."""
+
+    RATE_LIMIT_CONFIG = {
+        'max_points': 20000,         # Shopify Plus: 20000 & Standard:2000
+        'refill_rate': 1000,         # Points per second, Shopify Plus: 1000 & Standard:100
+        'request_cost': 15,          # Average cost per GraphQL request
+        'burst_buffer': 0.9,         # 90% of max points as safety buffer
+    }
     
     def __init__(self, shopify_domain: str, admin_api_token: str, api_version: str):
         self.base_url = f"https://{shopify_domain}/admin/api/{api_version}/graphql.json"
@@ -204,6 +210,39 @@ class ShopifyBulkOperator:
             'X-Shopify-Access-Token': admin_api_token
         }
         self.polling_interval = 5  # seconds
+        self.rate_limit_points = self.RATE_LIMIT_CONFIG['max_points']
+        self.last_refill_time = time.time()
+
+    def _calculate_refill(self):
+        """Update available points based on elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_refill_time
+        refilled = elapsed * self.RATE_LIMIT_CONFIG['refill_rate']
+        
+        self.rate_limit_points = min(
+            self.RATE_LIMIT_CONFIG['max_points'],
+            self.rate_limit_points + refilled
+        )
+        self.last_refill_time = now
+
+    def _check_rate_limit(self):
+        """Ensure we stay within rate limits, sleep if needed."""
+        self._calculate_refill()
+        
+        required = self.RATE_LIMIT_CONFIG['request_cost']
+        safety_threshold = self.RATE_LIMIT_CONFIG['max_points'] * self.RATE_LIMIT_CONFIG['burst_buffer']
+        
+        while self.rate_limit_points < required:
+            deficit = required - self.rate_limit_points
+            sleep_time = deficit / self.RATE_LIMIT_CONFIG['refill_rate']
+            
+            logger.debug(f"Rate limit exceeded, sleeping {sleep_time:.2f}s")
+            time.sleep(sleep_time)
+            self._calculate_refill()
+
+        self.rate_limit_points -= required
+        logger.debug(f"Points remaining: {self.rate_limit_points:.2f}")
+
 
     def _execute_graphql(self, query: str, variables: dict = None) -> dict:
         """Execute GraphQL query with error handling."""
@@ -385,16 +424,20 @@ class ShopifyBulkOperator:
 class ShopifyInventoryUpdater(ShopifyBulkOperator):
     """Handles inventory quantity updates using batched GraphQL mutations."""
     
-    MAX_CHANGES_PER_MUTATION = 100  # Shopify's limit
-    RATE_LIMIT_DELAY = 1  # Seconds between requests
+    MAX_CHANGES_PER_MUTATION = 250  # Shopify's limit
+    REQUEST_COST = 15
+    #RATE_LIMIT_DELAY = 1  # Seconds between requests
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.RATE_LIMIT_CONFIG['request_cost'] = self.REQUEST_COST
         self.mutation_query = """
-        mutation updateInventory($input: InventoryAdjustQuantitiesInput!) {
-            inventoryAdjustQuantities(input: $input) {
+        mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
+            inventorySetQuantities(input: $input) {
                 inventoryAdjustmentGroup {
+                    createdAt
                     reason
+                    referenceDocumentUri
                 }
                 userErrors {
                     field
@@ -416,24 +459,28 @@ class ShopifyInventoryUpdater(ShopifyBulkOperator):
         
         for batch_idx in range(0, len(changes), self.MAX_CHANGES_PER_MUTATION):
             batch = changes[batch_idx:batch_idx + self.MAX_CHANGES_PER_MUTATION]
-            variables = {
-                "input": {
-                    "reason": "correction",
-                    "name": "available",
-                    "changes": batch
+            try: 
+                # Check and wait for rate limit
+                self._check_rate_limit()
+                variables = {
+                    "input": {
+                        "reason": "correction",
+                        "name": "available",
+                        "ignoreCompareQuantity": True,
+                        "quantities": batch
+                    }
                 }
-            }
             
-            try:
                 response = self._execute_graphql(self.mutation_query, variables)
                 results['batches_sent'] += 1
                 
+                # Process response
                 if response.get('errors'):
                     results['errors'].extend(response['errors'])
                     results['failed_updates'] += len(batch)
                     logger.error(f"Inventory batch {batch_idx//self.MAX_CHANGES_PER_MUTATION} failed with errors")
                 else:
-                    user_errors = response['data']['inventoryAdjustQuantities']['userErrors']
+                    user_errors = response['data']['inventorySetQuantities']['userErrors']
                     if user_errors:
                         results['errors'].extend(user_errors)
                         results['failed_updates'] += len(user_errors)
@@ -443,6 +490,7 @@ class ShopifyInventoryUpdater(ShopifyBulkOperator):
                         results['successful_updates'] += len(batch)
                         logger.info(f"Successfully processed inventory batch of {len(batch)} items")
                 
+                # progress reporting
                 if update_queue:
                     update_queue.put({
                         "type": "progress",
@@ -458,6 +506,6 @@ class ShopifyInventoryUpdater(ShopifyBulkOperator):
                 })
             
             # Respect rate limits
-            time.sleep(self.RATE_LIMIT_DELAY)
+            #time.sleep(self.RATE_LIMIT_DELAY)
         
         return results

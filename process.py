@@ -33,8 +33,8 @@ def run_bulk_update_process(csv_filepath: str, output_results_dir: str,
         # Load environment configuration
         load_dotenv()
         shopify_domain = os.getenv("SHOPIFY_DOMAIN")
-        admin_api_token = os.getenv("DEMOATLANTIC_ADMIN_TOKEN")
-        api_version = os.getenv("SHOPIFY_API_VERSION", "2024-04")
+        admin_api_token = os.getenv("DEV2_ATLANTIC_ADMIN_TOKEN")
+        api_version = os.getenv("SHOPIFY_API_VERSION", "2025-04")
         location_id = os.getenv("SHOPIFY_LOCATION_ID")
 
         # Validate configuration
@@ -250,7 +250,7 @@ if __name__ == "__main__":
     
     run_bulk_update_process(
         csv_filepath="sample.csv",
-        output_results_dir="./results",
+        output_results_dir="./results/test",
         update_queue=queue,
         dry_run=False
     )
